@@ -1,0 +1,12 @@
+{
+  "NO3": {
+    "name": "Cà phê Quốc Lộc NO3",
+    "price": 125000,
+    "image": "https://example.com/images/no3.jpg"
+  },
+  "NO4": {
+    "name": "Cà phê Quốc Lộc NO4",
+    "price": 235000,
+    "image": "https://example.com/images/no4.jpg"
+  }
+}
