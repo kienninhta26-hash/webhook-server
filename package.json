@@ -1,9 +1,13 @@
 {
-  "name": "pancake-webhook",
+  "name": "webhook-server",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "express": "latest",
-    "axios": "latest"
+    "axios": "^1.6.0",
+    "express": "^4.18.0"
   }
 }
