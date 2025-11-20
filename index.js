@@ -1,144 +1,139 @@
+// ==============================
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
-const path = require("path");
-
 const app = express();
+
 app.use(express.json());
 
-// ===============================
-// 🔑 LẤY API KEY PANCAKE
-// ===============================
+// ===========================================
+// 🔑 LẤY API KEY TỪ VERCEL ENV
+// ===========================================
 const PANCAKE_API_KEY = process.env.PANCAKE_API_KEY;
 
-// ===============================
-// 📌 FILE LƯU DỮ LIỆU SẢN PHẨM
-// ===============================
-const PRODUCT_FILE = path.join(__dirname, "products.json");
-
-function saveProducts(list) {
-    fs.writeFileSync(PRODUCT_FILE, JSON.stringify(list, null, 2));
-}
-
-function loadProducts() {
-    if (!fs.existsSync(PRODUCT_FILE)) return [];
-    return JSON.parse(fs.readFileSync(PRODUCT_FILE));
-}
-
-// ===============================
-// 📌 API LẤY TẤT CẢ SẢN PHẨM TỪ PANCAKE (FULL SYNC)
-// ===============================
-app.get("/sync-all", async (req, res) => {
+// ===========================================
+// 📌 HÀM LẤY CHI TIẾT SẢN PHẨM
+// ===========================================
+async function getProductDetail(productId) {
     try {
-        console.log("🔄 Đang đồng bộ toàn bộ sản phẩm...");
-
-        const response = await axios.get(
-            "https://pos.pages.fm/api/v1/products",
-            {
-                headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` }
-            }
+        const res = await axios.get(
+            `https://pos.pages.fm/api/v1/products/${productId}`,
+            { headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` } }
         );
-
-        const data = response.data.data.items || [];
-        saveProducts(data);
-
-        console.log("✅ Đã đồng bộ:", data.length, "sản phẩm");
-        res.json({ message: "Đồng bộ toàn bộ OK", total: data.length });
-
+        return res.data.data;
     } catch (err) {
-        console.log("❌ Lỗi SYNC:", err.response?.data || err);
-        res.status(500).json({ error: "Lỗi sync-all" });
+        console.log("❌ Lỗi lấy chi tiết sp:", err.response?.data || err);
+        return null;
     }
+}
+
+// ===========================================
+// 📌 HÀM LẤY DANH SÁCH TẤT CẢ SẢN PHẨM
+// ===========================================
+async function getAllProducts() {
+    try {
+        const res = await axios.get(
+            `https://pos.pages.fm/api/v1/products`,
+            { headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` } }
+        );
+        return res.data.data;
+    } catch (err) {
+        console.log("❌ Lỗi lấy list sản phẩm:", err.response?.data || err);
+        return [];
+    }
+}
+
+// ===========================================
+// 📌 HÀM LƯU SẢN PHẨM LOCAL (products.json)
+// ===========================================
+function saveProductsToFile(products) {
+    try {
+        fs.writeFileSync("products.json", JSON.stringify(products, null, 2));
+        console.log("💾 Đã lưu file products.json");
+    } catch (err) {
+        console.log("❌ Không lưu được file products.json", err);
+    }
+}
+
+// ===========================================
+// 📌 WEBHOOK NHẬN SẢN PHẨM CẬP NHẬT TỪ PANCAKE
+// ===========================================
+app.post("/webhook", async (req, res) => {
+    console.log("📥 Webhook nhận:", req.body);
+
+    const productId = req.body?.data?.id;
+    if (!productId) return res.status(400).json({ message: "Không có productId" });
+
+    const product = await getProductDetail(productId);
+    if (!product) return res.status(500).json({ message: "Không lấy được sản phẩm" });
+
+    saveProductsToFile(product);
+
+    res.json({ message: "Đã nhận và lưu sản phẩm", product });
 });
 
-// ===============================
-// 📌 API TÌM SẢN PHẨM THEO TÊN
-// ===============================
-app.get("/product/search", (req, res) => {
-    const q = req.query.q?.toLowerCase();
-    if (!q) return res.json([]);
+// ===========================================
+// 📌 API 1: TÌM SẢN PHẨM THEO TÊN
+// ===========================================
+app.get("/search", async (req, res) => {
+    const keyword = req.query.q?.toLowerCase();
+    if (!keyword) return res.json([]);
 
-    const list = loadProducts();
+    const list = JSON.parse(fs.readFileSync("products.json", "utf8"));
+
     const result = list.filter(p =>
-        p.name.toLowerCase().includes(q)
+        p.name.toLowerCase().includes(keyword)
     );
 
     res.json(result);
 });
 
-// ===============================
-// 📌 API LẤY ẢNH THEO SKU
-// ===============================
-app.get("/product/sku/:sku", (req, res) => {
-    const sku = req.params.sku.toLowerCase();
+// ===========================================
+// 📌 API 2: LẤY ẢNH SKU
+// ===========================================
+app.get("/sku-image", async (req, res) => {
+    const skuId = req.query.id;
+    if (!skuId) return res.json({ error: "Thiếu sku id" });
 
-    const list = loadProducts();
+    const list = JSON.parse(fs.readFileSync("products.json", "utf8"));
 
-    const found = list.find(p =>
-        (p.variants || []).some(v => v.sku?.toLowerCase() === sku)
-    );
+    let img = null;
 
-    if (!found) return res.json({ image: null });
+    list.forEach(product => {
+        product.variants?.forEach(v => {
+            if (v.id == skuId) img = v.image_url;
+        });
+    });
 
-    const variant = found.variants.find(v => v.sku.toLowerCase() === sku);
-    const img = variant.images?.[0] || found.images?.[0] || null;
-
-    res.json({ image: img });
+    res.json({ skuId, image: img });
 });
 
-// ===============================
-// 📌 API LẤY THÔNG TIN 1 SẢN PHẨM CHO BOT
-// ===============================
-app.get("/product/:id", (req, res) => {
-    const id = req.params.id;
-    const list = loadProducts();
+// ===========================================
+// 📌 API 3: ĐỒNG BỘ TOÀN BỘ SẢN PHẨM
+// ===========================================
+app.get("/sync-all", async (req, res) => {
+    const list = await getAllProducts();
+    saveProductsToFile(list);
 
-    const found = list.find(p => String(p.id) === String(id));
-
-    res.json(found || {});
+    res.json({
+        message: "Đồng bộ full sản phẩm OK",
+        total: list.length
+    });
 });
 
-// ===============================
-// 📌 WEBHOOK TỪ PANCAKE (TỰ ĐỘNG NHẬN CẬP NHẬT)
-// ===============================
-app.post("/webhook", async (req, res) => {
-    const data = req.body.data;
-    if (!data?.id) return res.json({ message: "Không có ID" });
-
-    try {
-        const detail = await axios.get(
-            `https://pos.pages.fm/api/v1/products/${data.id}`,
-            {
-                headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` }
-            }
-        );
-
-        const product = detail.data.data;
-
-        // cập nhật vào file JSON
-        const list = loadProducts();
-        const index = list.findIndex(p => p.id === product.id);
-
-        if (index >= 0) list[index] = product;
-        else list.push(product);
-
-        saveProducts(list);
-
-        console.log("📥 Đã cập nhật sản phẩm:", product.name);
-        res.json({ message: "Webhook OK" });
-
-    } catch (err) {
-        console.log("❌ Lỗi webhook:", err.response?.data || err);
-        res.status(500).json({ error: "Webhook lỗi" });
-    }
+// ===========================================
+// 📌 API 4: CHO BOT LẤY DANH SÁCH SẢN PHẨM
+// ===========================================
+app.get("/products", (req, res) => {
+    const list = JSON.parse(fs.readFileSync("products.json", "utf8"));
+    res.json(list);
 });
 
-// ===============================
-// 📌 TRANG KIỂM TRA SERVER
-// ===============================
+// ===========================================
 app.get("/", (req, res) => {
-    res.send("Webhook Server is running...");
+    res.send("Webhook Server OK");
 });
 
-// ===============================
-module.exports = app;
+// ===========================================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("🚀 Server chạy:", PORT));
