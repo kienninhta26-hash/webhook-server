@@ -1,146 +1,73 @@
 // ===========================================
-// 🚀 WEBHOOK SERVER – PANCAKE API FIXED
+// 🚀 WEBHOOK SERVER – PANCAKE FULL Version FIX
 // ===========================================
 
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
-const app = express();
 
+const app = express();
 app.use(express.json());
 
-// ===========================================
-// 🔑 LẤY API KEY TỪ VERCEL ENV
-// ===========================================
+// API KEY từ Vercel ENV
 const PANCAKE_API_KEY = process.env.PANCAKE_API_KEY;
 
-// ===========================================
-// 📌 API PANCAKE ĐÃ ĐỔI URL (BẮT BUỘC SỬA)
-// ===========================================
-// ❌ Sai: https://pos.pages.fm/api/v1/products/ID
-// ✅ Đúng: https://pos.pancake.vn/api/products/ID
-
-const API_PANCAKE = "https://pos.pancake.vn/api";
-
-// ===========================================
-// 📌 HÀM LẤY THÔNG TIN 1 SẢN PHẨM
-// ===========================================
-async function getProductDetail(id) {
+// ======================
+// HÀM LẤY CHI TIẾT SP
+// ======================
+async function getProductDetail(productId) {
     try {
-        const res = await axios.get(`${API_PANCAKE}/products/${id}`, {
-            headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` }
-        });
-
-        return res.data?.data || null;
+        const res = await axios.get(
+            `https://pos.pages.fm/api/v1/products/${productId}`,
+            { headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` } }
+        );
+        return res.data.data;
     } catch (err) {
         console.log("❌ getProductDetail error:", err.response?.data || err);
         return null;
     }
 }
 
-// ===========================================
-// 📌 LẤY DANH SÁCH SẢN PHẨM
-// ===========================================
-async function getAllProducts() {
-    try {
-        const res = await axios.get(`${API_PANCAKE}/products`, {
-            headers: { Authorization: `Bearer ${PANCAKE_API_KEY}` }
-        });
-        return res.data?.data || [];
-    } catch (err) {
-        console.log("❌ Lỗi getAllProducts:", err.response?.data || err);
-        return [];
-    }
-}
-
-// ===========================================
-// 📌 LƯU FILE JSON
-// ===========================================
-function saveProducts(data) {
-    fs.writeFileSync("products.json", JSON.stringify(data, null, 2));
-}
-
-// ===========================================
-// 📌 WEBHOOK TỪ PANCAKE (CHỈ NHẬN SẢN PHẨM)
-// ===========================================
+// ======================
+// WEBHOOK NHẬN TỪ PANCAKE
+// ======================
 app.post("/webhook", async (req, res) => {
-    console.log("📥 Webhook:", req.body);
 
-    const id = req.body?.data?.id;
-    if (!id) return res.status(400).json({ ok: false, message: "Không có ID" });
+    console.log("📥 Webhook nhận được:", req.body);
 
-    const product = await getProductDetail(id);
+    const productId = req.body?.data?.id;
 
+    // Nếu webhook KHÔNG PHẢI sản phẩm → ignore
+    if (!productId) {
+        console.log("⚠ Webhook không chứa ID sản phẩm → Bỏ qua.");
+        return res.json({ ok: true, message: "Ignored non-product webhook" });
+    }
+
+    const product = await getProductDetail(productId);
     if (!product) {
-        return res.status(500).json({ ok: false, message: "Không lấy được sản phẩm" });
+        return res.json({ ok: false, message: "Không lấy được sản phẩm" });
     }
 
+    // Lưu file
     let list = [];
-
-    if (fs.existsSync("products.json")) {
+    if (fs.existsSync("products.json"))
         list = JSON.parse(fs.readFileSync("products.json"));
-    }
 
-    const index = list.findIndex(p => p.id === id);
-
-    if (index !== -1) list[index] = product;
+    const idx = list.findIndex(p => p.id === product.id);
+    if (idx >= 0) list[idx] = product;
     else list.push(product);
 
-    saveProducts(list);
+    fs.writeFileSync("products.json", JSON.stringify(list, null, 2));
 
-    res.json({ ok: true, message: "Đã đồng bộ", product });
+    console.log("✅ Đã SYNC:", product.name);
+
+    res.json({ ok: true, product });
 });
 
-// ===========================================
-// 📌 API TÌM SẢN PHẨM
-// ===========================================
-app.get("/product/search", (req, res) => {
-    if (!fs.existsSync("products.json")) return res.json([]);
-
-    const q = (req.query.q || "").toLowerCase();
-    const list = JSON.parse(fs.readFileSync("products.json"));
-
-    const found = list.filter(p => p.name.toLowerCase().includes(q));
-    res.json(found);
+// Trang test
+app.get("/", (req, res) => {
+    res.send("Webhook Server Running...");
 });
 
-// ===========================================
-// 📌 LẤY ẢNH SKU
-// ===========================================
-app.get("/product/sku-img", (req, res) => {
-    if (!fs.existsSync("products.json")) return res.json([]);
-
-    const id = Number(req.query.id);
-    const list = JSON.parse(fs.readFileSync("products.json"));
-    const product = list.find(p => p.id === id);
-
-    if (!product) return res.json([]);
-
-    res.json(product.skus?.map(s => ({ name: s.name, image: s.image })));
-});
-
-// ===========================================
-// 📌 LẤY TOÀN BỘ SẢN PHẨM
-// ===========================================
-app.get("/products", (req, res) => {
-    if (!fs.existsSync("products.json")) return res.json([]);
-    res.json(JSON.parse(fs.readFileSync("products.json")));
-});
-
-// ===========================================
-// 📌 ĐỒNG BỘ FULL SẢN PHẨM TỪ PANCAKE
-// ===========================================
-app.get("/products/sync-all", async (req, res) => {
-    const list = await getAllProducts();
-    saveProducts(list);
-
-    res.json({
-        ok: true,
-        message: "Đã sync toàn bộ sản phẩm!",
-        total: list.length
-    });
-});
-
-// ===========================================
-app.get("/", (_, res) => res.send("Webhook Server Running..."));
-app.listen(3000, () => console.log("🚀 Server running!"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("🚀 Server running on port " + PORT));
